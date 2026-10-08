@@ -131,5 +131,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 *.session
+*.db
+*.csv
+.vscode/
 data/
 exports/

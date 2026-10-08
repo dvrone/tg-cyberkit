@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — TG-CyberKit{% endblock %}
+
+{% block content %}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+
+    <div>
+        <h2 class="mb-1">Monitoring Dashboard</h2>
+        <p class="text-secondary mb-0">Telegram OTC message analysis</p>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+
+        <form
+            action="{{ url_for('upload') }}"
+            method="POST"
+            enctype="multipart/form-data"
+        >
+            <div class="input-group">
+                <input
+                    type="file"
+                    name="file"
+                    accept=".csv"
+                    class="form-control"
+                    required
+                >
+                <button class="btn btn-primary" type="submit">
+                    Upload CSV
+                </button>
+            </div>
+        </form>
+
+        {% if stats.total %}
+        <form
+            action="{{ url_for('clear') }}"
+            method="POST"
+            data-confirm="Barcha ma'lumotlar o'chiriladi. Davom etasizmi?"
+        >
+            <button class="btn btn-outline-danger" type="submit">
+                Clear dataset
+            </button>
+        </form>
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- Statistics -->
+
+<div class="row g-3 mb-4">
+
+    <div class="col-6 col-md-3">
+        <div class="card stat-card">
+            <div class="card-body">
+                <div class="text-secondary small">TOTAL MESSAGES</div>
+                <div class="stat-number">{{ stats.total }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+        <a
+            href="{{ url_for('index', risk='HIGH') }}"
+            class="text-decoration-none text-reset"
+        >
+            <div class="card stat-card danger-card stat-link">
+                <div class="card-body">
+                    <div class="text-secondary small">HIGH RISK</div>
+                    <div class="stat-number text-danger">{{ stats.high }}</div>
+                </div>
+            </div>
+        </a>
+    </div>
+
+    <div class="col-6 col-md-3">
+        <a
+            href="{{ url_for('index', risk='MEDIUM') }}"
+            class="text-decoration-none text-reset"
+        >
+            <div class="card stat-card warning-card stat-link">
+                <div class="card-body">
+                    <div class="text-secondary small">MEDIUM RISK</div>
+                    <div class="stat-number text-warning">{{ stats.medium }}</div>
+                </div>
+            </div>
+        </a>
+    </div>
+
+    <div class="col-6 col-md-3">
+        <a
+            href="{{ url_for('index', status='UNREVIEWED') }}"
+            class="text-decoration-none text-reset"
+        >
+            <div class="card stat-card stat-link">
+                <div class="card-body">
+                    <div class="text-secondary small">UNREVIEWED</div>
+                    <div class="stat-number">{{ stats.unreviewed }}</div>
+                </div>
+            </div>
+        </a>
+    </div>
+
+</div>
+
+
+<!-- Filters -->
+
+<div class="card mb-4">
+    <div class="card-body">
+
+        <form
+            method="GET"
+            action="{{ url_for('index') }}"
+            class="row g-2"
+        >
+
+            <div class="col-md-4">
+                <input
+                    type="text"
+                    name="q"
+                    class="form-control"
+                    placeholder="Search user, group or message..."
+                    value="{{ query }}"
+                >
+            </div>
+
+            <div class="col-md-3">
+                <select name="chat" class="form-select">
+                    <option value="">All groups</option>
+                    {% for name, count in groups %}
+                        <option
+                            value="{{ name }}"
+                            {% if selected_chat == name %}selected{% endif %}
+                        >{{ name or "(no group)" }} ({{ count }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="risk" class="form-select">
+                    <option value="">All risks</option>
+                    {% for value, label in [
+                        ("HIGH", "High"),
+                        ("MEDIUM", "Medium"),
+                        ("LOW", "Low"),
+                        ("UNKNOWN", "Unknown"),
+                    ] %}
+                        <option
+                            value="{{ value }}"
+                            {% if selected_risk == value %}selected{% endif %}
+                        >{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="status" class="form-select">
+                    <option value="">All statuses</option>
+                    {% for value, label in [
+                        ("UNREVIEWED", "Unreviewed"),
+                        ("CONFIRMED", "Confirmed"),
+                        ("FALSE_POSITIVE", "False Positive"),
+                        ("NEEDS_REVIEW", "Needs Review"),
+                    ] %}
+                        <option
+                            value="{{ value }}"
+                            {% if selected_status == value %}selected{% endif %}
+                        >{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-1 d-flex gap-2">
+                <button class="btn btn-outline-primary flex-fill" type="submit">
+                    Filter
+                </button>
+                <a
+                    href="{{ url_for('index') }}"
+                    class="btn btn-outline-secondary"
+                    title="Reset filters"
+                >
+                    ✕
+                </a>
+            </div>
+
+        </form>
+
+    </div>
+</div>
+
+
+<!-- Messages -->
+
+<div class="card">
+
+    <div class="card-header bg-transparent">
+        <div class="d-flex justify-content-between">
+            <span class="fw-semibold">Messages</span>
+            <span class="text-secondary">{{ messages|length }} results</span>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+
+        <table class="table table-dark table-hover align-top mb-0">
+
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Group</th>
+                    <th>User</th>
+                    <th>Message</th>
+                    <th></th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+            {% for message in messages %}
+                <tr>
+                    <td class="text-nowrap">{{ message.date or "-" }}</td>
+
+                    <td class="group-cell">
+                        {% if message.chat %}
+                            <a
+                                href="{{ url_for('index', chat=message.chat) }}"
+                                class="group-badge"
+                                style="--group-color: {{ message.chat|group_color }}"
+                                title="Show only this group"
+                            >{{ message.chat }}</a>
+                        {% else %}
+                            <span class="text-secondary">-</span>
+                        {% endif %}
+                    </td>
+
+                    <td><span class="text-info">{{ message.user or "-" }}</span></td>
+
+                    <td class="message-text">{{ message.message or "-" }}</td>
+
+                    <td class="text-end">
+                        <a
+                            href="{{ url_for('message_detail', message_id=message.id) }}"
+                            class="btn btn-sm btn-outline-light"
+                        >
+                            View
+                        </a>
+                    </td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="5" class="text-center text-secondary py-5">
+                        {% if stats.total %}
+                            No messages match the current filters.
+                        {% else %}
+                            No data yet. Upload a CSV file to begin.
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+{% endblock %}

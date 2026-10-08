@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% from "_macros.html" import risk_badge, status_badge %}
+
+{% block title %}Message #{{ message.id }} — TG-CyberKit{% endblock %}
+
+{% block content %}
+
+<div class="mb-4">
+    <a href="{{ url_for('index') }}" class="text-decoration-none">
+        ← Back to dashboard
+    </a>
+</div>
+
+
+<div class="row g-4">
+
+    <!-- Message -->
+
+    <div class="col-lg-8">
+        <div class="card">
+
+            <div class="card-header bg-transparent">
+                <div class="d-flex justify-content-between">
+                    <span class="fw-semibold">Message #{{ message.id }}</span>
+                    <span class="text-secondary">{{ message.date or "-" }}</span>
+                </div>
+            </div>
+
+            <div class="card-body">
+
+                <div class="row mb-3">
+                    <div class="col-sm-6 mb-3 mb-sm-0">
+                        <div class="text-secondary small">USER</div>
+                        <div class="fw-semibold text-info">
+                            {{ message.user or "-" }}
+                        </div>
+                    </div>
+
+                    <div class="col-sm-6">
+                        <div class="text-secondary small">GROUP</div>
+                        <div>{{ message.chat or "-" }}</div>
+                    </div>
+                </div>
+
+                <hr>
+
+                <div class="message-full">{{ message.message or "-" }}</div>
+
+            </div>
+
+        </div>
+    </div>
+
+
+    <!-- Analysis -->
+
+    <div class="col-lg-4">
+
+        <div class="card mb-3">
+
+            <div class="card-header bg-transparent">Analysis</div>
+
+            <div class="card-body">
+
+                <div class="row mb-3">
+                    <div class="col-6">
+                        <div class="text-secondary small mb-1">RISK</div>
+                        {{ risk_badge(message.risk, large=true) }}
+                    </div>
+
+                    <div class="col-6">
+                        <div class="text-secondary small mb-1">STATUS</div>
+                        {{ status_badge(message.status, large=true) }}
+                    </div>
+                </div>
+
+                <div>
+                    <div class="text-secondary small">REASON</div>
+                    <p class="mb-0">
+                        {{ message.reason or "No analysis available." }}
+                    </p>
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- Human review -->
+
+        <div class="card">
+
+            <div class="card-header bg-transparent">Human Review</div>
+
+            <div class="card-body">
+
+                <p class="text-secondary small">
+                    LLM output is only a triage signal.
+                    Final classification requires human review.
+                </p>
+
+                {% for action, label, btn_class, target in [
+                    ("confirmed", "Confirm Suspicious", "btn-danger", "CONFIRMED"),
+                    ("false-positive", "False Positive", "btn-outline-secondary", "FALSE_POSITIVE"),
+                    ("needs-review", "Needs Review", "btn-warning", "NEEDS_REVIEW"),
+                ] %}
+                    <form
+                        method="POST"
+                        action="{{ url_for('review', message_id=message.id, action=action) }}"
+                        class="{{ 'mb-2' if not loop.last }}"
+                    >
+                        <button
+                            class="btn {{ btn_class }} w-100"
+                            type="submit"
+                            {% if message.status == target %}disabled{% endif %}
+                        >
+                            {{ label }}
+                        </button>
+                    </form>
+                {% endfor %}
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

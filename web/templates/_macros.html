@@ -1,0 +1,29 @@
+{# _macros.html #}
+
+{% macro risk_badge(risk, large=false) -%}
+    {% set r = (risk or "UNKNOWN").upper() %}
+    {% set size = " fs-6" if large else "" %}
+    {% if r == "HIGH" %}
+        <span class="badge bg-danger{{ size }}">HIGH</span>
+    {% elif r == "MEDIUM" %}
+        <span class="badge bg-warning text-dark{{ size }}">MEDIUM</span>
+    {% elif r == "LOW" %}
+        <span class="badge bg-success{{ size }}">LOW</span>
+    {% else %}
+        <span class="badge bg-secondary{{ size }}">{{ r }}</span>
+    {% endif %}
+{%- endmacro %}
+
+
+{% macro status_badge(status, large=false) -%}
+    {% set size = " fs-6" if large else "" %}
+    {% if status == "CONFIRMED" %}
+        <span class="badge bg-danger{{ size }}">CONFIRMED</span>
+    {% elif status == "FALSE_POSITIVE" %}
+        <span class="badge bg-secondary{{ size }}">FALSE POSITIVE</span>
+    {% elif status == "NEEDS_REVIEW" %}
+        <span class="badge bg-warning text-dark{{ size }}">NEEDS REVIEW</span>
+    {% else %}
+        <span class="badge bg-dark border{{ size }}">UNREVIEWED</span>
+    {% endif %}
+{%- endmacro %}
