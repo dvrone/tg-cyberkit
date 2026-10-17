@@ -135,4 +135,4 @@ __marimo__/
 *.csv
 .vscode/
 data/
-exports/
+exports/*.session-journal
