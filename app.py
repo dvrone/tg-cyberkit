@@ -497,6 +497,8 @@ def messages_from_list(items: list, chat_name: str = "") -> list[dict]:
                 "id": item.get("id", ""),
                 "sender": str(sender),
                 "sender_id": "" if sender_id is None else str(sender_id),
+                "username": str(item.get("username") or ""),
+                "display_name": str(item.get("from") or ""),
                 "date": str(item.get("date", "")),
                 "chat": chat_name,
                 "text": text,
@@ -736,17 +738,84 @@ def write_json_export(path: Path, payload: dict) -> None:
     tmp_path.replace(path)
 
 
+CATEGORY_LABELS = {
+    "crypto": "Kripto",
+    "banking_and_cards": "Bank / kartalar",
+    "account_and_auth": "Akkaunt / avtorizatsiya",
+    "identity_and_kyc": "Identifikatsiya / KYC",
+    "transactions_and_cashout": "Naqdlashtirish / tranzaksiya",
+    "finance_and_tax": "Moliya / soliq",
+    "gambling_and_betting": "Qimor / stavka",
+    "otc_and_offers": "OTC takliflar",
+    "account_market": "Akkaunt bozori",
+    "payment_intermediaries": "To‘lov vositachilari",
+}
+
+NONE_LABEL = "(yo‘q)"
+MAX_IDS_SHOWN = 30
+MAX_TEXT_CHARS = 3000
+
+
+def category_label(key: str) -> str:
+    return CATEGORY_LABELS.get(key, key)
+
+
 def format_match(match: dict) -> str:
     if match.get("match_type") == "fuzzy":
         return f"`{match['keyword']}` ← «{match.get('matched_text', '')}»"
     return f"`{match['keyword']}`"
 
 
-def quote_block(text: str, limit: int = 1500) -> list[str]:
+def format_time(raw: str) -> str:
+    """Aware ISO timestamp -> '17.09.2026, 07:05:45 (Toshkent)'.
+    Timestamps without a timezone are shown as written, with a note."""
+    try:
+        moment = datetime.fromisoformat(raw)
+    except ValueError:
+        return raw or "—"
+    if moment.tzinfo is None:
+        return f"{moment:%d.%m.%Y, %H:%M:%S} (vaqt zonasi noma‘lum)"
+    return f"{moment.astimezone(TASHKENT):%d.%m.%Y, %H:%M:%S} (Toshkent)"
+
+
+def code_block(text: str) -> list[str]:
+    """Fenced block that cannot be broken by backticks inside the message."""
     text = text.replace("\r", "").strip()
-    if len(text) > limit:
-        text = text[:limit].rstrip() + "…"
-    return [f"> {line}" if line else ">" for line in text.split("\n")]
+    if len(text) > MAX_TEXT_CHARS:
+        text = text[:MAX_TEXT_CHARS].rstrip() + "…"
+    fence = "```"
+    while fence in text:
+        fence += "`"
+    return [f"{fence}text", text, fence]
+
+
+def group_hits(hits: list[tuple[dict, dict]]) -> list[dict]:
+    """Merge identical messages from the same sender (case/punctuation-insensitive).
+
+    Different sender IDs are never merged: identical text from several accounts
+    is a separate signal and should stay visible as separate entries.
+    """
+    groups: dict[tuple[str, str], dict] = {}
+    for message, result in hits:
+        key = (
+            message["sender_id"] or message["sender"],
+            normalize_text(message["text"]),
+        )
+        group = groups.get(key)
+        if group is None:
+            groups[key] = {"messages": [message], "result": result}
+        else:
+            group["messages"].append(message)
+
+    for group in groups.values():
+        group["messages"].sort(
+            key=lambda m: m["date"]
+        )  # ISO strings sort chronologically
+
+    return sorted(
+        groups.values(),
+        key=lambda g: (-g["result"]["total_score"], -len(g["messages"])),
+    )
 
 
 def build_markdown(
@@ -755,60 +824,77 @@ def build_markdown(
     hits: list[tuple[dict, dict]],
     params: dict,
 ) -> str:
-    fuzzy_info = f"ha, chegara {params['threshold']}" if params["fuzzy"] else "yo'q"
+    groups = group_hits(hits)
+    fuzzy_info = f"ha, chegara {params['threshold']}" if params["fuzzy"] else "yo‘q"
+
     lines = [
-        "# Kalit so'zlar hisoboti",
+        "# Kalit so‘zlar hisoboti",
         "",
         f"- Manba: `{source}`",
-        f"- Sana: {datetime.now():%Y-%m-%d %H:%M}",
+        f"- Hisobot sanasi: {datetime.now(TASHKENT):%d.%m.%Y, %H:%M} (Toshkent)",
         f"- Tekshirilgan xabarlar: {total}",
-        f"- Topilgan xabarlar: {len(hits)}",
+        f"- Mos kelgan xabarlar: {len(hits)} (noyob: {len(groups)})",
         f"- Fuzzy qidiruv: {fuzzy_info}",
         f"- Minimal ball: {params['min_score']}",
         "",
-        "## Kategoriyalar bo'yicha",
+        "## Toifalar bo‘yicha",
         "",
-        "| Kategoriya | Xabarlar | Jami ball |",
+        "| Toifa | Noyob xabarlar | Jami xabarlar |",
         "|---|---:|---:|",
     ]
 
-    stats: dict[str, list[float]] = {}
-    for _, result in hits:
-        for category, info in result["categories"].items():
-            entry = stats.setdefault(category, [0, 0.0])
+    stats: dict[str, list[int]] = {}
+    for group in groups:
+        for category in group["result"]["categories"]:
+            entry = stats.setdefault(category, [0, 0])
             entry[0] += 1
-            entry[1] += info["score"]
+            entry[1] += len(group["messages"])
 
-    for category, (count, score) in sorted(
-        stats.items(), key=lambda x: (-x[1][0], x[0])
+    for category, (unique, messages) in sorted(
+        stats.items(), key=lambda item: (-item[1][1], item[0])
     ):
-        lines.append(f"| {category} | {int(count)} | {round(score, 2)} |")
+        lines.append(f"| {category_label(category)} | {unique} | {messages} |")
+    lines.append("")
 
-    lines += ["", "## Topilgan xabarlar", ""]
+    for number, group in enumerate(groups, 1):
+        items = group["messages"]
+        first, last = items[0], items[-1]
+        result = group["result"]
+        count = len(items)
 
-    for number, (message, result) in enumerate(hits, 1):
-        lines.append(f"### {number}. Ball: {result['total_score']}")
+        lines.append(f"## {number}. Xabar" + (f" — {count} marta" if count > 1 else ""))
+        lines += [
+            f"- **Sender ID:** `{first['sender_id'] or NONE_LABEL}`",
+            f"- **Username:** `{('@' + first['username']) if first['username'] else NONE_LABEL}`",
+            f"- **Ko‘rsatilgan ism:** `{first['display_name'] or NONE_LABEL}`",
+            "- **Indikator toifalari:** "
+            + ", ".join(category_label(c) for c in result["categories"]),
+            f"- **Ball:** {result['total_score']}",
+            "- **Topilgan so‘zlar:** "
+            + ", ".join(
+                format_match(m)
+                for info in result["categories"].values()
+                for m in info["matches"]
+            ),
+        ]
 
-        meta = []
-        if message["sender"]:
-            meta.append(f"**Yuboruvchi:** {message['sender']}")
-        if message["sender_id"]:
-            meta.append(f"**Yuboruvchi ID:** {message['sender_id']}")
-        if message["date"]:
-            meta.append(f"**Sana (UTC):** {message['date']}")
-        if message["chat"]:
-            meta.append(f"**Chat:** {message['chat']}")
-        if message["id"] != "":
-            meta.append(f"**Xabar ID:** {message['id']}")
-        if meta:
-            lines += [" · ".join(meta), ""]
+        if count > 1:
+            lines += [
+                f"- **Birinchi yuborilgan:** `{format_time(first['date'])}`",
+                f"- **Oxirgi yuborilgan:** `{format_time(last['date'])}`",
+            ]
+        else:
+            lines.append(f"- **Yuborilgan:** `{format_time(first['date'])}`")
 
-        lines += quote_block(message["text"])
+        ids = [f"`{m['id']}`" for m in items if m["id"] != ""]
+        if ids:
+            shown = ", ".join(ids[:MAX_IDS_SHOWN])
+            if len(ids) > MAX_IDS_SHOWN:
+                shown += f", … (+{len(ids) - MAX_IDS_SHOWN})"
+            lines.append(f"- **Message ID’lar ({len(ids)}):** {shown}")
+
         lines.append("")
-
-        for category, info in result["categories"].items():
-            found = ", ".join(format_match(m) for m in info["matches"])
-            lines.append(f"- **{category}** ({info['score']}): {found}")
+        lines += code_block(first["text"])
         lines.append("")
 
     return "\n".join(lines)
