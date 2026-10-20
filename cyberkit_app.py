@@ -2,10 +2,10 @@
 """
 Cyberkit App — Telegram collector + keyword matcher in ONE file
 
-Tab 1 (Yig'ish):  log in to Telegram, pick a group you are a member of,
+Tab 1 (Collect):  log in to Telegram, pick a group you are a member of,
                   pick a date range (Tashkent days), collect messages,
                   optionally save them as JSON.
-Tab 2 (Tahlil):   run the multilingual keyword matcher on the collected
+Tab 2 (Analyze):  run the multilingual keyword matcher on the collected
                   messages (or on any JSON file) and save a Markdown report.
 
 Config (.env next to this file; only needed for the collector tab):
@@ -43,7 +43,7 @@ try:
     from flashtext import KeywordProcessor
 except ImportError:
     sys.exit(
-        "flashtext o'rnatilmagan. Buyruq: pip install flashtext rapidfuzz telethon python-dotenv"
+        "flashtext is not installed. Run: pip install flashtext rapidfuzz telethon python-dotenv"
     )
 
 try:
@@ -536,8 +536,8 @@ def load_messages(path: Path) -> list[dict]:
             return messages
 
     raise ValueError(
-        "JSON tuzilmasi tanilmadi. Kutilgan: xabarlar ro'yxati yoki "
-        "Telegram eksporti ('messages' / 'chats.list')."
+        "Unrecognized JSON structure. Expected: a list of messages or "
+        "a Telegram export ('messages' / 'chats.list')."
     )
 
 
@@ -552,11 +552,11 @@ def load_config() -> tuple[int, str, str]:
     api_id = os.getenv("TG_API_ID")
     api_hash = os.getenv("TG_API_HASH")
     if not api_id or not api_hash:
-        raise ValueError(".env faylida TG_API_ID va TG_API_HASH topilmadi.")
+        raise ValueError(".env is missing TG_API_ID and/or TG_API_HASH.")
     try:
         api_id_int = int(api_id)
     except ValueError as error:
-        raise ValueError("TG_API_ID son bo'lishi kerak.") from error
+        raise ValueError("TG_API_ID must be an integer.") from error
     session = os.getenv("TG_SESSION", DEFAULT_SESSION)
     Path(session).parent.mkdir(parents=True, exist_ok=True)
     return api_id_int, api_hash, session
@@ -642,7 +642,7 @@ class TelegramService:
         self.events.put(("ask", (prompt, secret, reply)))
         answer = reply.get()
         if answer is None:
-            raise RuntimeError("Login bekor qilindi.")
+            raise RuntimeError("Login cancelled.")
         return answer
 
     async def connect_and_list(
@@ -651,9 +651,9 @@ class TelegramService:
         if self.client is None:
             self.client = TelegramClient(session, api_id, api_hash)
         await self.client.start(
-            phone=lambda: self.ask("Telefon raqam (+998...):"),
-            code_callback=lambda: self.ask("Telegramdan kelgan kod:"),
-            password=lambda: self.ask("2FA parol:", secret=True),
+            phone=lambda: self.ask("Phone number (+998...):"),
+            code_callback=lambda: self.ask("Code sent by Telegram:"),
+            password=lambda: self.ask("2FA password:", secret=True),
         )
 
         groups: list[dict] = []
@@ -739,19 +739,19 @@ def write_json_export(path: Path, payload: dict) -> None:
 
 
 CATEGORY_LABELS = {
-    "crypto": "Kripto",
-    "banking_and_cards": "Bank / kartalar",
-    "account_and_auth": "Akkaunt / avtorizatsiya",
-    "identity_and_kyc": "Identifikatsiya / KYC",
-    "transactions_and_cashout": "Naqdlashtirish / tranzaksiya",
-    "finance_and_tax": "Moliya / soliq",
-    "gambling_and_betting": "Qimor / stavka",
-    "otc_and_offers": "OTC takliflar",
-    "account_market": "Akkaunt bozori",
-    "payment_intermediaries": "To‘lov vositachilari",
+    "crypto": "Crypto",
+    "banking_and_cards": "Banking / cards",
+    "account_and_auth": "Accounts / authentication",
+    "identity_and_kyc": "Identity / KYC",
+    "transactions_and_cashout": "Cash-out / transactions",
+    "finance_and_tax": "Finance / tax",
+    "gambling_and_betting": "Gambling / betting",
+    "otc_and_offers": "OTC offers",
+    "account_market": "Account market",
+    "payment_intermediaries": "Payment intermediaries",
 }
 
-NONE_LABEL = "(yo‘q)"
+NONE_LABEL = "(none)"
 MAX_IDS_SHOWN = 30
 MAX_TEXT_CHARS = 3000
 
@@ -767,15 +767,15 @@ def format_match(match: dict) -> str:
 
 
 def format_time(raw: str) -> str:
-    """Aware ISO timestamp -> '17.09.2026, 07:05:45 (Toshkent)'.
+    """Aware ISO timestamp -> '17.09.2026, 07:05:45 (Tashkent)'.
     Timestamps without a timezone are shown as written, with a note."""
     try:
         moment = datetime.fromisoformat(raw)
     except ValueError:
         return raw or "—"
     if moment.tzinfo is None:
-        return f"{moment:%d.%m.%Y, %H:%M:%S} (vaqt zonasi noma‘lum)"
-    return f"{moment.astimezone(TASHKENT):%d.%m.%Y, %H:%M:%S} (Toshkent)"
+        return f"{moment:%d.%m.%Y, %H:%M:%S} (timezone unknown)"
+    return f"{moment.astimezone(TASHKENT):%d.%m.%Y, %H:%M:%S} (Tashkent)"
 
 
 def code_block(text: str) -> list[str]:
@@ -825,21 +825,21 @@ def build_markdown(
     params: dict,
 ) -> str:
     groups = group_hits(hits)
-    fuzzy_info = f"ha, chegara {params['threshold']}" if params["fuzzy"] else "yo‘q"
+    fuzzy_info = f"yes, threshold {params['threshold']}" if params["fuzzy"] else "no"
 
     lines = [
-        "# Kalit so‘zlar hisoboti",
+        "# Keyword report",
         "",
-        f"- Manba: `{source}`",
-        f"- Hisobot sanasi: {datetime.now(TASHKENT):%d.%m.%Y, %H:%M} (Toshkent)",
-        f"- Tekshirilgan xabarlar: {total}",
-        f"- Mos kelgan xabarlar: {len(hits)} (noyob: {len(groups)})",
-        f"- Fuzzy qidiruv: {fuzzy_info}",
-        f"- Minimal ball: {params['min_score']}",
+        f"- Source: `{source}`",
+        f"- Report date: {datetime.now(TASHKENT):%d.%m.%Y, %H:%M} (Tashkent)",
+        f"- Messages checked: {total}",
+        f"- Matched messages: {len(hits)} (unique: {len(groups)})",
+        f"- Fuzzy search: {fuzzy_info}",
+        f"- Minimum score: {params['min_score']}",
         "",
-        "## Toifalar bo‘yicha",
+        "## By category",
         "",
-        "| Toifa | Noyob xabarlar | Jami xabarlar |",
+        "| Category | Unique messages | Total messages |",
         "|---|---:|---:|",
     ]
 
@@ -862,15 +862,17 @@ def build_markdown(
         result = group["result"]
         count = len(items)
 
-        lines.append(f"## {number}. Xabar" + (f" — {count} marta" if count > 1 else ""))
+        lines.append(
+            f"## {number}. Message" + (f" — {count} times" if count > 1 else "")
+        )
         lines += [
             f"- **Sender ID:** `{first['sender_id'] or NONE_LABEL}`",
             f"- **Username:** `{('@' + first['username']) if first['username'] else NONE_LABEL}`",
-            f"- **Ko‘rsatilgan ism:** `{first['display_name'] or NONE_LABEL}`",
-            "- **Indikator toifalari:** "
+            f"- **Display name:** `{first['display_name'] or NONE_LABEL}`",
+            "- **Indicator categories:** "
             + ", ".join(category_label(c) for c in result["categories"]),
-            f"- **Ball:** {result['total_score']}",
-            "- **Topilgan so‘zlar:** "
+            f"- **Score:** {result['total_score']}",
+            "- **Matched keywords:** "
             + ", ".join(
                 format_match(m)
                 for info in result["categories"].values()
@@ -880,18 +882,18 @@ def build_markdown(
 
         if count > 1:
             lines += [
-                f"- **Birinchi yuborilgan:** `{format_time(first['date'])}`",
-                f"- **Oxirgi yuborilgan:** `{format_time(last['date'])}`",
+                f"- **First sent:** `{format_time(first['date'])}`",
+                f"- **Last sent:** `{format_time(last['date'])}`",
             ]
         else:
-            lines.append(f"- **Yuborilgan:** `{format_time(first['date'])}`")
+            lines.append(f"- **Sent:** `{format_time(first['date'])}`")
 
         ids = [f"`{m['id']}`" for m in items if m["id"] != ""]
         if ids:
             shown = ", ".join(ids[:MAX_IDS_SHOWN])
             if len(ids) > MAX_IDS_SHOWN:
                 shown += f", … (+{len(ids) - MAX_IDS_SHOWN})"
-            lines.append(f"- **Message ID’lar ({len(ids)}):** {shown}")
+            lines.append(f"- **Message IDs ({len(ids)}):** {shown}")
 
         lines.append("")
         lines += code_block(first["text"])
@@ -960,7 +962,7 @@ class App:
         self.last_params: dict = {}
         self.match_stop = threading.Event()
 
-        self.status_var = tk.StringVar(value="Tayyor.")
+        self.status_var = tk.StringVar(value="Ready.")
         self._build_ui()
 
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -977,8 +979,8 @@ class App:
 
         self.collect_tab = ttk.Frame(self.notebook, padding=10)
         self.match_tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(self.collect_tab, text="1. Yig'ish")
-        self.notebook.add(self.match_tab, text="2. Tahlil")
+        self.notebook.add(self.collect_tab, text="1. Collect")
+        self.notebook.add(self.match_tab, text="2. Analyze")
 
         self._build_collect_tab()
         self._build_match_tab()
@@ -997,20 +999,20 @@ class App:
         if self.service is None:
             ttk.Label(
                 tab,
-                text="Telethon o'rnatilmagan, yig'ish o'chiq.\n"
-                "Buyruq: pip install telethon python-dotenv\n"
-                "«Tahlil» yorlig'ida tayyor JSON faylni tahlil qilish mumkin.",
+                text="Telethon is not installed, collecting is disabled.\n"
+                "Run: pip install telethon python-dotenv\n"
+                "You can still analyze a ready JSON file on the Analyze tab.",
             ).pack(anchor="w")
             return
 
         self.connect_btn = ttk.Button(
-            tab, text="Telegramga ulanish va guruhlarni yuklash", command=self.connect
+            tab, text="Connect to Telegram and load groups", command=self.connect
         )
         self.connect_btn.pack(anchor="w")
 
         group_row = ttk.Frame(tab)
         group_row.pack(fill="x", pady=8)
-        ttk.Label(group_row, text="Guruh:").pack(side="left")
+        ttk.Label(group_row, text="Group:").pack(side="left")
         self.group_var = tk.StringVar()
         self.group_box = ttk.Combobox(
             group_row, textvariable=self.group_var, state="readonly"
@@ -1024,25 +1026,25 @@ class App:
         self.save_json_var = tk.BooleanVar(value=True)
 
         options = ttk.LabelFrame(
-            tab, text="Oraliq (Toshkent kunlari, ikkalasi ham kiradi)", padding=8
+            tab, text="Date range (Tashkent days, both inclusive)", padding=8
         )
         options.pack(fill="x")
-        ttk.Label(options, text="Dan (YYYY-MM-DD):").pack(side="left")
+        ttk.Label(options, text="From (YYYY-MM-DD):").pack(side="left")
         ttk.Entry(options, textvariable=self.first_var, width=12).pack(
             side="left", padx=(4, 12)
         )
-        ttk.Label(options, text="Gacha:").pack(side="left")
+        ttk.Label(options, text="To:").pack(side="left")
         ttk.Entry(options, textvariable=self.last_var, width=12).pack(
             side="left", padx=(4, 12)
         )
-        ttk.Label(options, text="Limit (ixtiyoriy):").pack(side="left")
+        ttk.Label(options, text="Limit (optional):").pack(side="left")
         ttk.Entry(options, textvariable=self.limit_var, width=8).pack(
             side="left", padx=4
         )
 
         ttk.Checkbutton(
             tab,
-            text=f"Yig'ilgan xabarlarni JSON faylga ham saqlash ({EXPORT_DIR}/ papkasiga)",
+            text=f"Also save collected messages as a JSON file (in {EXPORT_DIR}/)",
             variable=self.save_json_var,
         ).pack(anchor="w", pady=8)
 
@@ -1050,13 +1052,13 @@ class App:
         actions.pack(fill="x")
         self.collect_btn = ttk.Button(
             actions,
-            text="Yig'ishni boshlash",
+            text="Start collecting",
             command=self.start_collect,
             state="disabled",
         )
         self.collect_btn.pack(side="left")
         self.stop_collect_btn = ttk.Button(
-            actions, text="To'xtatish", command=self.stop_collect, state="disabled"
+            actions, text="Stop", command=self.stop_collect, state="disabled"
         )
         self.stop_collect_btn.pack(side="left", padx=6)
 
@@ -1070,12 +1072,12 @@ class App:
 
         source_row = ttk.Frame(tab)
         source_row.pack(fill="x")
-        ttk.Label(source_row, text="Manba:").pack(side="left")
+        ttk.Label(source_row, text="Source:").pack(side="left")
         self.source_var = tk.StringVar(
-            value="Hali tanlanmagan (yig'ing yoki JSON tanlang)"
+            value="Not selected yet (collect messages or choose a JSON file)"
         )
         ttk.Label(source_row, textvariable=self.source_var).pack(side="left", padx=6)
-        ttk.Button(source_row, text="JSON fayl tanlash…", command=self.open_json).pack(
+        ttk.Button(source_row, text="Choose JSON file…", command=self.open_json).pack(
             side="right"
         )
 
@@ -1083,20 +1085,20 @@ class App:
         self.threshold_var = tk.IntVar(value=90)
         self.min_score_var = tk.DoubleVar(value=1)
 
-        options = ttk.LabelFrame(tab, text="Sozlamalar", padding=8)
+        options = ttk.LabelFrame(tab, text="Settings", padding=8)
         options.pack(fill="x", pady=8)
         fuzzy_check = ttk.Checkbutton(
-            options, text="Fuzzy qidiruv", variable=self.fuzzy_var
+            options, text="Fuzzy search", variable=self.fuzzy_var
         )
         fuzzy_check.pack(side="left")
         if process is None:
             fuzzy_check.state(["disabled"])
             self.fuzzy_var.set(False)
-        ttk.Label(options, text="Fuzzy chegarasi:").pack(side="left", padx=(16, 4))
+        ttk.Label(options, text="Fuzzy threshold:").pack(side="left", padx=(16, 4))
         ttk.Spinbox(
             options, from_=0, to=100, width=5, textvariable=self.threshold_var
         ).pack(side="left")
-        ttk.Label(options, text="Minimal ball:").pack(side="left", padx=(16, 4))
+        ttk.Label(options, text="Minimum score:").pack(side="left", padx=(16, 4))
         ttk.Spinbox(
             options,
             from_=0,
@@ -1108,17 +1110,14 @@ class App:
 
         actions = ttk.Frame(tab)
         actions.pack(fill="x")
-        self.run_btn = ttk.Button(actions, text="Tahlil qilish", command=self.run_match)
+        self.run_btn = ttk.Button(actions, text="Analyze", command=self.run_match)
         self.run_btn.pack(side="left")
         self.cancel_btn = ttk.Button(
-            actions, text="Bekor qilish", command=self.cancel_match, state="disabled"
+            actions, text="Cancel", command=self.cancel_match, state="disabled"
         )
         self.cancel_btn.pack(side="left", padx=6)
         self.save_btn = ttk.Button(
-            actions,
-            text="Markdown saqlash…",
-            command=self.save_markdown,
-            state="disabled",
+            actions, text="Save Markdown…", command=self.save_markdown, state="disabled"
         )
         self.save_btn.pack(side="right")
 
@@ -1134,10 +1133,10 @@ class App:
             table_frame, columns=columns, show="headings", selectmode="browse"
         )
         headings = {
-            "score": ("Ball", 60),
-            "sender": ("Yuboruvchi", 140),
-            "categories": ("Kategoriyalar", 220),
-            "message": ("Xabar", 480),
+            "score": ("Score", 60),
+            "sender": ("Sender", 140),
+            "categories": ("Categories", 220),
+            "message": ("Message", 480),
         }
         for column, (title, width) in headings.items():
             self.tree.heading(column, text=title)
@@ -1182,8 +1181,8 @@ class App:
 
     def _on_error(self, payload: tuple) -> None:
         origin, text = payload
-        messagebox.showerror("Xato", text)
-        self.status_var.set("Xato yuz berdi.")
+        messagebox.showerror("Error", text)
+        self.status_var.set("An error occurred.")
         if origin == "connected":
             self.connect_btn.configure(state="normal")
         elif origin == "collect_done":
@@ -1197,10 +1196,10 @@ class App:
         try:
             api_id, api_hash, session = load_config()
         except ValueError as error:
-            messagebox.showerror("Sozlama xatosi", str(error))
+            messagebox.showerror("Configuration error", str(error))
             return
         self.connect_btn.configure(state="disabled")
-        self.status_var.set("Telegramga ulanmoqda… (login so'ralishi mumkin)")
+        self.status_var.set("Connecting to Telegram… (you may be asked to log in)")
         self.service.run(
             self.service.connect_and_list(api_id, api_hash, session), "connected"
         )
@@ -1215,13 +1214,13 @@ class App:
         if self.groups:
             self.group_box.current(0)
             self.collect_btn.configure(state="normal")
-        self.connect_btn.configure(state="normal", text="Guruhlarni qayta yuklash")
-        self.status_var.set(f"Ulandi. {len(groups)} ta guruh/kanal topildi.")
+        self.connect_btn.configure(state="normal", text="Reload groups")
+        self.status_var.set(f"Connected. {len(groups)} groups/channels found.")
 
     def start_collect(self) -> None:
         group = self.groups.get(self.group_var.get())
         if not group:
-            messagebox.showwarning("Guruh tanlanmagan", "Avval guruhni tanlang.")
+            messagebox.showwarning("No group selected", "Choose a group first.")
             return
 
         try:
@@ -1229,13 +1228,12 @@ class App:
             last_day = date.fromisoformat(self.last_var.get().strip())
         except ValueError:
             messagebox.showwarning(
-                "Noto'g'ri sana", "Sana formati: YYYY-MM-DD (masalan 2026-10-01)."
+                "Invalid date", "Date format: YYYY-MM-DD (for example 2026-10-01)."
             )
             return
         if first_day > last_day:
             messagebox.showwarning(
-                "Noto'g'ri oraliq",
-                "«Dan» sanasi «Gacha» sanasidan keyin bo'lmasligi kerak.",
+                "Invalid range", "The start date must not be after the end date."
             )
             return
 
@@ -1244,7 +1242,7 @@ class App:
         if limit_text:
             if not limit_text.isdigit() or int(limit_text) <= 0:
                 messagebox.showwarning(
-                    "Noto'g'ri limit", "Limit musbat butun son bo'lishi kerak."
+                    "Invalid limit", "Limit must be a positive integer."
                 )
                 return
             limit = int(limit_text)
@@ -1257,8 +1255,8 @@ class App:
             "limit": limit,
         }
         self._set_collect_busy(True)
-        self.collect_info_var.set("Yig'ilmoqda…")
-        self.status_var.set(f"Yig'ilmoqda: {group['title']}")
+        self.collect_info_var.set("Collecting…")
+        self.status_var.set(f"Collecting: {group['title']}")
         self.service.stop_event.clear()
         self.service.run(
             self.service.collect(group["id"], start_utc, end_utc, limit), "collect_done"
@@ -1266,10 +1264,10 @@ class App:
 
     def stop_collect(self) -> None:
         self.service.stop_event.set()
-        self.status_var.set("To'xtatilmoqda…")
+        self.status_var.set("Stopping…")
 
     def _on_collect_progress(self, count: int) -> None:
-        self.collect_info_var.set(f"{count} ta xabar yig'ildi…")
+        self.collect_info_var.set(f"{count} messages collected…")
 
     def _on_collect_done(self, payload: tuple) -> None:
         raw_messages, stats, complete = payload
@@ -1294,18 +1292,18 @@ class App:
                 write_json_export(path, export)
                 saved_note = f" JSON: {path}"
             except OSError as error:
-                messagebox.showerror("JSON saqlanmadi", str(error))
+                messagebox.showerror("JSON not saved", str(error))
 
         info = (
-            f"{len(raw_messages)} ta matnli xabar, "
-            f"{stats['skipped_no_text']} ta matnsiz o'tkazib yuborildi, "
-            f"to'liq: {'ha' if complete else 'YOQ (to`xtatilgan)'}.{saved_note}"
+            f"{len(raw_messages)} text messages, "
+            f"{stats['skipped_no_text']} without text skipped, "
+            f"complete: {'yes' if complete else 'NO (stopped)'}.{saved_note}"
         )
         self.collect_info_var.set(info)
-        self.status_var.set("Yig'ish tugadi.")
+        self.status_var.set("Collecting finished.")
 
         if not raw_messages:
-            messagebox.showinfo("Bo'sh natija", "Bu oraliqda matnli xabar topilmadi.")
+            messagebox.showinfo("Empty result", "No text messages found in this range.")
             return
 
         self._set_messages(
@@ -1331,38 +1329,38 @@ class App:
         self.messages = messages
         self.source_name = source_name
         self._clear_results()
-        self.source_var.set(f"{source_name} — {len(messages)} ta xabar")
-        self.status_var.set("Manba tayyor. «Tahlil qilish» tugmasini bosing.")
+        self.source_var.set(f"{source_name} — {len(messages)} messages")
+        self.status_var.set("Source ready. Click Analyze.")
 
     def open_json(self) -> None:
         path_text = filedialog.askopenfilename(
-            title="JSON fayl tanlang",
-            filetypes=[("JSON fayllar", "*.json"), ("Barcha fayllar", "*.*")],
+            title="Choose a JSON file",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
         )
         if not path_text:
             return
         path = Path(path_text)
 
         self.root.configure(cursor="watch")
-        self.status_var.set("JSON o'qilmoqda…")
+        self.status_var.set("Reading JSON…")
         self.root.update_idletasks()
         try:
             messages = load_messages(path)
         except (OSError, ValueError) as error:
-            messagebox.showerror("JSON o'qilmadi", str(error))
-            self.status_var.set("Xato yuz berdi.")
+            messagebox.showerror("Could not read JSON", str(error))
+            self.status_var.set("An error occurred.")
             return
         finally:
             self.root.configure(cursor="")
 
         if not messages:
-            messagebox.showinfo("Bo'sh fayl", "Faylda matnli xabar topilmadi.")
+            messagebox.showinfo("Empty file", "No text messages found in the file.")
         self._set_messages(messages, path.name)
 
     def run_match(self) -> None:
         if not self.messages:
             messagebox.showwarning(
-                "Manba yo'q", "Avval xabarlarni yig'ing yoki JSON fayl tanlang."
+                "No source", "Collect messages or choose a JSON file first."
             )
             return
 
@@ -1371,12 +1369,12 @@ class App:
             min_score = float(self.min_score_var.get())
         except tk.TclError:
             messagebox.showwarning(
-                "Noto'g'ri qiymat", "Chegara va ball son bo'lishi kerak."
+                "Invalid value", "Threshold and score must be numbers."
             )
             return
         if not 0 <= threshold <= 100:
             messagebox.showwarning(
-                "Noto'g'ri qiymat", "Fuzzy chegarasi 0 dan 100 gacha bo'lishi kerak."
+                "Invalid value", "Fuzzy threshold must be between 0 and 100."
             )
             return
 
@@ -1389,7 +1387,7 @@ class App:
         self._clear_results()
         self._set_match_busy(True)
         self.match_progress.configure(value=0, maximum=max(len(self.messages), 1))
-        self.status_var.set("Tahlil boshlandi…")
+        self.status_var.set("Analysis started…")
 
         self.match_stop.clear()
         threading.Thread(
@@ -1400,35 +1398,35 @@ class App:
 
     def cancel_match(self) -> None:
         self.match_stop.set()
-        self.status_var.set("Bekor qilinmoqda…")
+        self.status_var.set("Cancelling…")
 
     def _on_match_progress(self, payload: tuple) -> None:
         done, total = payload
         self.match_progress.configure(value=done)
-        self.status_var.set(f"Tahlil: {done}/{total}")
+        self.status_var.set(f"Analyzing: {done}/{total}")
 
     def _on_match_done(self, hits: list) -> None:
         self.hits = hits
         self._populate()
         self._set_match_busy(False)
         self.status_var.set(
-            f"Tugadi: {len(self.messages)} ta xabardan {len(hits)} tasi mos keldi."
+            f"Done: {len(hits)} of {len(self.messages)} messages matched."
         )
 
     def _on_match_cancelled(self, _payload: Any) -> None:
         self._set_match_busy(False)
-        self.status_var.set("Bekor qilindi.")
+        self.status_var.set("Cancelled.")
 
     def save_markdown(self) -> None:
         if not self.hits:
-            messagebox.showinfo("Bo'sh natija", "Saqlash uchun natija yo'q.")
+            messagebox.showinfo("Empty result", "There are no results to save.")
             return
 
         path = filedialog.asksaveasfilename(
-            title="Markdown hisobotni saqlash",
+            title="Save Markdown report",
             defaultextension=".md",
             initialfile=f"{slugify(self.source_name)}_matches.md",
-            filetypes=[("Markdown", "*.md"), ("Barcha fayllar", "*.*")],
+            filetypes=[("Markdown", "*.md"), ("All files", "*.*")],
         )
         if not path:
             return
@@ -1439,11 +1437,11 @@ class App:
             )
             Path(path).write_text(content, encoding="utf-8")
         except OSError as error:
-            messagebox.showerror("Saqlab bo'lmadi", str(error))
+            messagebox.showerror("Could not save", str(error))
             return
 
-        self.status_var.set(f"Saqlandi: {path}")
-        messagebox.showinfo("Tayyor", f"Hisobot saqlandi:\n{path}")
+        self.status_var.set(f"Saved: {path}")
+        messagebox.showinfo("Done", f"Report saved:\n{path}")
 
     def _set_match_busy(self, busy: bool) -> None:
         self.run_btn.configure(state="disabled" if busy else "normal")
@@ -1481,9 +1479,9 @@ class App:
 
         parts = [message["text"].strip(), "", "—" * 20]
         if message["sender_id"]:
-            parts.append(f"Yuboruvchi ID: {message['sender_id']}")
+            parts.append(f"Sender ID: {message['sender_id']}")
         if message["date"]:
-            parts.append(f"Sana (UTC): {message['date']}")
+            parts.append(f"Date (UTC): {message['date']}")
         for category, info in result["categories"].items():
             found = ", ".join(
                 (
@@ -1514,7 +1512,7 @@ class App:
 
 def main() -> None:
     root = tk.Tk()
-    root.title("Cyberkit — Yig'ish va Tahlil")
+    root.title("Cyberkit — Collect and Analyze")
     root.geometry("1000x700")
     root.minsize(760, 520)
     App(root)
